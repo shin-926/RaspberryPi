@@ -76,10 +76,11 @@ FIREBASE_API_KEY = "AIzaSyAs06X1IdEQNzLfj2OvsdwLLikoDxSUi2w"
 FIRESTORE_BASE = f"https://firestore.googleapis.com/v1/projects/{FIRESTORE_PROJECT}/databases/(default)/documents"
 
 
-@app.route("/api/discharge-destination", methods=["GET"])
+@app.route("/api/discharge-destination", methods=["POST"])
 def discharge_destination():
-    name = request.args.get("name")
-    date = request.args.get("date")
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+    date = data.get("date")
     if not name or not date:
         return jsonify({"error": "name and date are required"}), 400
 
