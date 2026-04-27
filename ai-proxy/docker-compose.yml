@@ -1,9 +1,10 @@
 services:
-  claude-proxy:
+  ai-proxy:
     build: .
-    container_name: claude-proxy
+    container_name: ai-proxy
     restart: unless-stopped
     ports:
       - "3002:3002"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
