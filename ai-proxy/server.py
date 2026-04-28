@@ -190,8 +190,8 @@ def discharge_destination():
         type_filter = {"fieldFilter": {"field": {"fieldPath": "type"}, "op": "EQUAL", "value": {"stringValue": "退院"}}}
         date_filter = {"fieldFilter": {"field": {"fieldPath": "date"}, "op": "EQUAL", "value": {"stringValue": date}}}
 
-        def is_archived(fields: dict) -> bool:
-            return fields.get("archived", {}).get("booleanValue") is True
+        # NOTE: 退院サマリーは退院後（=archived 後）に作成されるのが通常運用なので
+        # archived レコードもヒット対象に含める。
 
         # 1. patientId が指定されていれば ID のみで検索（最優先）
         # 複数ヒット時は要求日付に最も近いレコードを採用（予定日のズレに対応）
@@ -199,10 +199,7 @@ def discharge_destination():
             id_filter = {"fieldFilter": {"field": {"fieldPath": "patientId"}, "op": "EQUAL", "value": {"stringValue": patient_id}}}
             results = run_query([type_filter, id_filter], limit=20)
             if results:
-                docs = [
-                    r["document"]["fields"] for r in results
-                    if "document" in r and not is_archived(r["document"]["fields"])
-                ]
+                docs = [r["document"]["fields"] for r in results if "document" in r]
                 if docs:
                     from datetime import date as _date
                     def parse_ymd(s: str):
@@ -233,8 +230,6 @@ def discharge_destination():
             if "document" not in result:
                 continue
             fields = result["document"]["fields"]
-            if is_archived(fields):
-                continue
             doc_name = fields.get("name", {}).get("stringValue", "")
             if re.sub(r"\s+", "", doc_name) == clean_name:
                 source = fields.get("source", {}).get("stringValue", "")
