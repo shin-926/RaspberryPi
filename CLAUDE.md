@@ -63,6 +63,8 @@
 | Nextcloud | 8888 | `~/docker/nextcloud/docker-compose.yml` |
 | Home Assistant | 8123 | `~/docker/homeassistant/docker-compose.yml` |
 | Whisper (STT) | 10300 | `~/docker/whisper/docker-compose.yml` |
+| ai-proxy | 3002 | `~/ai-proxy/docker-compose.yml` (Mac側 `~/Documents/RaspberryPi/ai-proxy/`) |
+| henry-user-settings | 3003 | `~/henry-user-settings/docker-compose.yml` (Mac側 `~/Documents/RaspberryPi/henry-user-settings/`) |
 
 ## ファイル構成 (ラズパイ側)
 
@@ -72,6 +74,8 @@
 | `/etc/nginx/` | Nginx設定 |
 | `~/docker/` | Docker Compose設定 |
 | `~/ward-board-sync/` | 病棟ボード同期スクリプト（cron） |
+| `~/ai-proxy/` | Claude/Gemini API プロキシ (Docker) |
+| `~/henry-user-settings/` | Henry拡張のユーザー設定同期サーバー (Docker) |
 | `~/.config/gcloud/` | ADC認証情報（Firebase Admin SDK用） |
 
 ## Cronジョブ

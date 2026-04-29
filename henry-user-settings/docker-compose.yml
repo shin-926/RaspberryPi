@@ -1,0 +1,11 @@
+services:
+  henry-user-settings:
+    build: .
+    container_name: henry-user-settings
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./data:/data
+    environment:
+      - DB_PATH=/data/henry-user-settings.db
