@@ -24,12 +24,19 @@ from flask_cors import CORS
 
 DB_PATH = Path(os.environ.get("DB_PATH", "/data/henry-user-settings.db"))
 PORT = int(os.environ.get("PORT", 3003))
+MAX_BODY_BYTES = 64 * 1024  # 64KB: 想定最大設定サイズの数倍。攻撃ペイロードDoS対策
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SETTINGS] %(message)s")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_BODY_BYTES
 CORS(app, origins=["chrome-extension://*", "https://henry-app.jp", "https://*.henry-app.jp"])
+
+
+@app.errorhandler(413)
+def request_too_large(_e):
+    return jsonify({"error": "Payload too large"}), 413
 
 # ---------------------------------------------------------------------------
 # DB
