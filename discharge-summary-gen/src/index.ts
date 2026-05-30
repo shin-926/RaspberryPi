@@ -24,6 +24,9 @@ import { renderDischargeSummaryDocx } from './google-docs.ts';
 import { uploadDocxToHenry } from './henry-upload.ts';
 import { registerDischargeSummary } from './firestore.ts';
 import { env } from './env.ts';
+import { getHenryIdToken } from './henry-auth.ts';
+import { getGoogleAccessToken } from './google-auth.ts';
+import { getWebappsSession } from './webapps-auth.ts';
 
 const FILE_TYPE_DOCX = 'FILE_TYPE_DOCX';
 const PATIENT_DELAY_MS = 1500;
@@ -114,10 +117,38 @@ async function processTarget(t: DischargeTarget): Promise<'generated' | 'uploade
   return 'uploaded';
 }
 
+/**
+ * 認証の事前疎通。Gemini呼び出し前に Henry/Google/(本番のみ)maokahp-webapps を
+ * 軽く refresh して、いずれか失効していれば対象ループに入らず即停止する。
+ * これにより「9件全部 Gemini を呼んだ後に Google で全件失敗」のような無駄を防ぐ。
+ */
+async function preflight(): Promise<void> {
+  const checks: Array<[string, () => Promise<unknown>]> = [
+    ['Henry', getHenryIdToken],
+    ['Google (OAuth/Docs)', getGoogleAccessToken],
+  ];
+  if (CONFIRM) checks.push(['maokahp-webapps (Firestore)', getWebappsSession]);
+
+  for (const [name, fn] of checks) {
+    try {
+      await fn();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      const msg = `認証事前疎通失敗 [${name}]: ${detail}`;
+      console.error(`[gen] FATAL ${msg}`);
+      await pingUptimeKuma('down', msg.slice(0, 180));
+      process.exit(1);
+    }
+  }
+  console.log('[gen] 認証事前疎通OK');
+}
+
 async function main(): Promise<void> {
   const startedAt = new Date();
   const mode = CONFIRM ? '本番（カルテ書き込み）' : 'ドライラン（_out/ にdocx出力のみ）';
   console.log(`[gen] 開始 ${startedAt.toISOString()} / モード: ${mode} / window=${WINDOW_DAYS}日 / max=${MAX === Number.MAX_SAFE_INTEGER ? '無制限' : MAX}`);
+
+  await preflight();
 
   const { totalDischarged, inWindow, alreadyHasSummary, targets } = await detectTargets(WINDOW_DAYS);
   console.log(`[gen] 検知: 退院済み${totalDischarged} / 直近${WINDOW_DAYS}日${inWindow} / サマリ有${alreadyHasSummary} / 対象${targets.length}`);
