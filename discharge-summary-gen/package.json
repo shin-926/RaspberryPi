@@ -1,0 +1,20 @@
+{
+  "name": "discharge-summary-gen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "退院検知→AI退院サマリー生成→カルテ保存→一覧登録 を無人実行するcronスクリプト",
+  "scripts": {
+    "spike": "tsx src/spike.ts",
+    "gen": "tsx src/index.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
