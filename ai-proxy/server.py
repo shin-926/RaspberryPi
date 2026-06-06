@@ -8,7 +8,11 @@ from flask_cors import CORS
 from anthropic import Anthropic
 
 app = Flask(__name__)
-CORS(app, origins=["chrome-extension://*", "https://*.henry-app.jp"])
+CORS(app, origins=[
+    "chrome-extension://*",
+    "https://*.henry-app.jp",
+    "https://maokahp-discharge-summaries.web.app",
+])
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [PROXY] %(message)s")
 logger = logging.getLogger(__name__)
@@ -240,6 +244,148 @@ def discharge_destination():
     except Exception as e:
         logger.error("Discharge destination error: %s", e)
         return jsonify({"found": False, "source": None}), 500
+
+
+# =====================================================================
+# Henry GraphQL bridge: discharge-summaries-app から呼ばれて
+# Henry の患者ファイル本体と Firestore レコードを連動削除する。
+# =====================================================================
+
+HENRY_FIREBASE_API_KEY = os.environ.get("HENRY_FIREBASE_API_KEY", "")
+HENRY_FIREBASE_REFRESH_TOKEN = os.environ.get("HENRY_FIREBASE_REFRESH_TOKEN", "")
+HENRY_ORG_UUID = os.environ.get("HENRY_ORG_UUID", "")
+HENRY_GRAPHQL_ENDPOINT = os.environ.get("HENRY_GRAPHQL_ENDPOINT", "https://henry-app.jp/graphql")
+
+# プロセスローカル ID トークンキャッシュ。Firebase ID トークンは 1 時間有効。
+_henry_token_cache = {"id_token": None, "expires_at": 0.0}
+
+
+def get_henry_id_token() -> str:
+    """Henry の Firebase Refresh Token から ID トークンを取得（1 時間キャッシュ）"""
+    import time
+    now = time.time()
+    cached = _henry_token_cache.get("id_token")
+    if cached and now < _henry_token_cache["expires_at"] - 60:
+        return cached
+    if not HENRY_FIREBASE_API_KEY or not HENRY_FIREBASE_REFRESH_TOKEN:
+        raise RuntimeError("Henry 認証情報が未設定")
+    res = http_requests.post(
+        f"https://securetoken.googleapis.com/v1/token?key={HENRY_FIREBASE_API_KEY}",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": HENRY_FIREBASE_REFRESH_TOKEN,
+        },
+        timeout=10,
+    )
+    if res.status_code != 200:
+        raise RuntimeError(f"Henry token refresh failed: {res.status_code} {res.text[:200]}")
+    data = res.json()
+    _henry_token_cache["id_token"] = data["id_token"]
+    _henry_token_cache["expires_at"] = now + int(data.get("expires_in", "3600"))
+    return data["id_token"]
+
+
+def verify_webapps_id_token(id_token: str) -> dict | None:
+    """maokahp-webapps の Firebase ID トークンを検証して payload を返す。
+    Identity Toolkit の lookup が成功すれば signature/有効期限は OK と判断し、
+    payload はトークンから直接 base64 decode して custom claim (henryUuid) を取り出す。
+    """
+    import base64
+    import json as _json
+    try:
+        res = http_requests.post(
+            f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={FIREBASE_API_KEY}",
+            json={"idToken": id_token},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.error("ID token verify request error: %s", e)
+        return None
+    if res.status_code != 200 or not (res.json().get("users") or []):
+        return None
+    parts = id_token.split(".")
+    if len(parts) != 3:
+        return None
+    payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        return _json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return None
+
+
+@app.route("/api/henry/delete-patient-file", methods=["POST"])
+def delete_patient_file():
+    data = request.get_json(silent=True) or {}
+    id_token = data.get("idToken")
+    patient_file_uuid = data.get("patientFileUuid")
+    if not id_token or not patient_file_uuid:
+        return jsonify({"error": "idToken and patientFileUuid are required"}), 400
+
+    # 1. 呼び出し元の Firebase ID トークン検証 + henryUuid claim 必須
+    claims = verify_webapps_id_token(id_token)
+    if not claims:
+        return jsonify({"error": "invalid token"}), 401
+    if not claims.get("henryUuid"):
+        return jsonify({"error": "not a Henry-authenticated user"}), 403
+
+    # 2. Henry の DeletePatientFile を実行
+    try:
+        henry_token = get_henry_id_token()
+    except Exception as e:
+        logger.error("Henry auth failed: %s", e)
+        return jsonify({"error": "henry auth unavailable"}), 503
+
+    mutation = (
+        "mutation DeletePatientFile($input: DeletePatientFileRequestInput!) {"
+        " deletePatientFile(input: $input) }"
+    )
+    try:
+        henry_res = http_requests.post(
+            HENRY_GRAPHQL_ENDPOINT,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {henry_token}",
+                "x-auth-organization-uuid": HENRY_ORG_UUID,
+            },
+            json={"query": mutation, "variables": {"input": {"uuid": patient_file_uuid}}},
+            timeout=15,
+        )
+    except Exception as e:
+        logger.error("Henry API call failed: %s", e)
+        return jsonify({"error": "henry call failed"}), 502
+    if henry_res.status_code != 200:
+        logger.error("Henry API HTTP %s: %s", henry_res.status_code, henry_res.text[:200])
+        return jsonify({"error": "henry returned non-200"}), 502
+
+    henry_json = henry_res.json()
+    henry_errors = henry_json.get("errors") or []
+    if henry_errors:
+        # 既に削除済みのファイルは NOT_FOUND が返る。これは握りつぶして
+        # Firestore 側の掃除に進む（孤立レコードの撤去用途）。
+        msgs = "; ".join(e.get("message", "") for e in henry_errors)
+        logger.warning("Henry deletion warning (continuing): %s", msgs)
+
+    # 3. Firestore ドキュメントを呼び出し元の ID トークン経由で削除
+    #    （Firestore ルールがそのまま効く）
+    try:
+        fs_res = http_requests.delete(
+            f"{FIRESTORE_BASE}/discharge_summaries/{patient_file_uuid}",
+            headers={"Authorization": f"Bearer {id_token}"},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.error("Firestore delete request failed: %s", e)
+        return jsonify({"error": "firestore delete failed"}), 500
+    if fs_res.status_code not in (200, 204):
+        logger.error("Firestore delete HTTP %s: %s", fs_res.status_code, fs_res.text[:200])
+        return jsonify({"error": "firestore delete failed"}), 500
+
+    logger.info(
+        "deleted discharge summary: file=%s by=%s",
+        patient_file_uuid,
+        claims.get("henryUuid"),
+    )
+    return jsonify({"deleted": True})
 
 
 if __name__ == "__main__":
