@@ -21,7 +21,7 @@ import { formatCalendarForPrompt, buildPromptMarkdown } from './prompt.ts';
 import { callGeminiProxy, fetchDischargeDestination } from './generate.ts';
 import { buildReplacements, dischargeSummaryFileName } from './docfields.ts';
 import { renderDischargeSummaryDocx } from './google-docs.ts';
-import { uploadDocxToHenry } from './henry-upload.ts';
+import { uploadDocxToHenry, getHospitalizationFolderUuid } from './henry-upload.ts';
 import { registerDischargeSummary } from './firestore.ts';
 import { env } from './env.ts';
 import { getHenryIdToken } from './henry-auth.ts';
@@ -91,7 +91,13 @@ async function processTarget(t: DischargeTarget): Promise<'generated' | 'uploade
 
   // description='discharge-summary' を付与すると、編集→再保存後も一覧アプリから開ける
   // （Henry拡張の henry_drive_docs_handler が description を見て Firestore docId を付け替える）
-  const patientFileUuid = await uploadDocxToHenry(t.patientUuid, docxBytes, title, null, 'discharge-summary');
+  // 退院サマリーは入院に紐づく文書なので「入院」フォルダ配下に保存する。
+  // フォルダが見つからない場合はルートへフォールバック（運用上はテンプレートが存在する想定）。
+  const hospFolderUuid = await getHospitalizationFolderUuid();
+  if (!hospFolderUuid) {
+    console.warn('[discharge-summary-gen]「入院」フォルダが見つかりません。患者ルートに保存します');
+  }
+  const patientFileUuid = await uploadDocxToHenry(t.patientUuid, docxBytes, title, hospFolderUuid, 'discharge-summary');
   try {
     await registerDischargeSummary({
       patientFileUuid,

@@ -21,6 +21,33 @@ const M_CREATE_PATIENT_FILE = `
     }
   }`;
 
+const Q_LIST_PATIENT_FILE_FOLDERS = `
+  query ListPatientFileFolders($input: ListPatientFileFoldersRequestInput!) {
+    listPatientFileFolders(input: $input) {
+      patientFileFolders { uuid name }
+    }
+  }`;
+
+// undefined = 未取得, null = 取得済みだが「入院」フォルダなし
+let cachedHospitalizationFolderUuid: string | null | undefined;
+
+/**
+ * 患者ファイルフォルダ「入院」の UUID を返す。プロセスローカルにキャッシュ。
+ * Henry のフォルダテンプレートは患者横断のため 1 回引けば十分。
+ * 見つからない場合は null を返し、呼び出し側でルート保存にフォールバックする。
+ */
+export async function getHospitalizationFolderUuid(): Promise<string | null> {
+  if (cachedHospitalizationFolderUuid !== undefined) return cachedHospitalizationFolderUuid;
+  const data = await query<{
+    listPatientFileFolders?: { patientFileFolders?: Array<{ uuid: string; name: string }> };
+  }>(Q_LIST_PATIENT_FILE_FOLDERS, {
+    input: { pageSize: 100, pageToken: '', parentFileFolderUuid: null },
+  });
+  const folders = data.listPatientFileFolders?.patientFileFolders || [];
+  cachedHospitalizationFolderUuid = folders.find((f) => f.name === '入院')?.uuid ?? null;
+  return cachedHospitalizationFolderUuid;
+}
+
 async function getFileUploadUrl(): Promise<{ uploadUrl: string; fileUrl: string }> {
   const data = await query<{ getFileUploadUrl?: { uploadUrl: string; fileUrl: string } }>(
     Q_GET_FILE_UPLOAD_URL,
