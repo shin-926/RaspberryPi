@@ -383,9 +383,13 @@ def delete_patient_file():
     except Exception as e:
         logger.error("Firestore delete request failed: %s", e)
         return jsonify({"error": "firestore delete failed"}), 500
-    if fs_res.status_code not in (200, 204):
+    # 404 は既に削除済み or doc ID と patientFileUuid 不一致の孤立レコード。
+    # 削除は idempotent なので成功扱いにする（クライアント側の UI スタック防止）。
+    if fs_res.status_code not in (200, 204, 404):
         logger.error("Firestore delete HTTP %s: %s", fs_res.status_code, fs_res.text[:200])
         return jsonify({"error": "firestore delete failed"}), 500
+    if fs_res.status_code == 404:
+        logger.info("Firestore doc not found (idempotent ok): %s", patient_file_uuid)
 
     logger.info(
         "deleted discharge summary: file=%s by=%s",
