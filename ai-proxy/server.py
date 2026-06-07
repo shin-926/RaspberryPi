@@ -316,10 +316,17 @@ def verify_webapps_id_token(id_token: str) -> dict | None:
 @app.route("/api/henry/delete-patient-file", methods=["POST"])
 def delete_patient_file():
     data = request.get_json(silent=True) or {}
-    id_token = data.get("idToken")
+    # ID Token は Authorization: Bearer <token> ヘッダで受け取るのを正式とする。
+    # 旧クライアント互換のため body の idToken もフォールバックとして許容する。
+    auth_header = request.headers.get("Authorization", "")
+    id_token = ""
+    if auth_header.startswith("Bearer "):
+        id_token = auth_header[len("Bearer "):].strip()
+    if not id_token:
+        id_token = data.get("idToken") or ""
     patient_file_uuid = data.get("patientFileUuid")
     if not id_token or not patient_file_uuid:
-        return jsonify({"error": "idToken and patientFileUuid are required"}), 400
+        return jsonify({"error": "idToken (Authorization header) and patientFileUuid are required"}), 400
 
     # 1. 呼び出し元の Firebase ID トークン検証 + henryUuid claim 必須
     claims = verify_webapps_id_token(id_token)
