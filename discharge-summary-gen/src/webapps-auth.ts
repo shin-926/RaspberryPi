@@ -283,3 +283,23 @@ export async function webappsFirestoreFetch(path: string, init: RequestInit = {}
   };
   return rest(`${FIRESTORE_BASE}/${path}`, { ...init, headers });
 }
+
+/**
+ * Firestore structuredQuery を runQuery で実行。返り値は { document?: { fields } } の配列。
+ * collectionId はルート直下のコレクションを想定（discharge_summaries 等）。
+ */
+export async function webappsFirestoreRunQuery(structuredQuery: object): Promise<Array<{ document?: { name: string; fields?: Record<string, FirestoreField> } }>> {
+  const session = await getWebappsSession();
+  const r = await rest(`${FIRESTORE_BASE}:runQuery`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.idToken}`,
+    },
+    body: JSON.stringify({ structuredQuery }),
+  });
+  if (!r.ok) {
+    throw new Error(`runQuery 失敗 (HTTP ${r.status}): ${r.body.slice(0, 300)}`);
+  }
+  return JSON.parse(r.body) as Array<{ document?: { name: string; fields?: Record<string, FirestoreField> } }>;
+}

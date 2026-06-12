@@ -127,8 +127,10 @@ async function preflight(): Promise<void> {
   const checks: Array<[string, () => Promise<unknown>]> = [
     ['Henry', getHenryIdToken],
     ['Google (OAuth/Docs)', getGoogleAccessToken],
+    // 検知段階で discharge_summaries Firestore を冪等性キーとして参照するため、
+    // ドライランでも webapps セッションが必須
+    ['maokahp-webapps (Firestore)', getWebappsSession],
   ];
-  if (CONFIRM) checks.push(['maokahp-webapps (Firestore)', getWebappsSession]);
 
   for (const [name, fn] of checks) {
     try {

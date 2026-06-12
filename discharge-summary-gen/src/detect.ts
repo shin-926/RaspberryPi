@@ -1,10 +1,17 @@
 // Phase E: 退院検知。ListPatientsV2(DISCHARGED) で直近退院者を取得し、
-// listPatientFiles で「退院サマリ」未作成の患者を生成対象として抽出する。
-// （henry_discharge_summary_sync.ts の Phase1/2 を踏襲。冪等性は「退院サマリ」ファイルの有無で担保）
+// Firestore discharge_summaries で「同入院のサマリ未生成」の患者を抽出する。
+//
+// 冪等性の source of truth は Firestore (discharge_summaries) コレクション。
+// 以前は Henry の listPatientFiles でタイトル一致を見ていたが、
+// listPatientFiles(parentFolderId: null) はルート直下しか返さず、
+// サマリは入院フォルダにアップロードされるため検知をすり抜けて毎日重複生成していた。
+// （Henry拡張の henry_drive_docs_handler.ts:293 にも同じ注意書きあり）
+// → Firestore に「同 patientUuid + admissionDate」のドキュメントが既にあれば skip。
 import { query } from './graphql.ts';
+import { webappsFirestoreRunQuery } from './webapps-auth.ts';
+import { formatHenryDate } from './collect.ts';
 import type { HenryDate } from './types.ts';
 
-const SUMMARY_KEYWORD = '退院サマリ';
 const EXCLUDE_NAME_RE = /テスト|操作確認|動作確認/;
 const PAGE_SIZE = 100;
 const READ_DELAY_MS = 300;
@@ -18,14 +25,6 @@ const PATIENTS_Q = `
         patient { uuid serialNumber fullName fullNamePhonetic detail { sexType birthDate { year month day } } }
         hospitalization { startDate { year month day } endDate { year month day } hospitalizationDoctor { doctor { name } } }
       }
-      nextPageToken
-    }
-  }`;
-
-const FILES_Q = `
-  query ListPatientFiles($patientId: ID!, $parentFolderId: ID, $searchQuery: String, $pageSize: Int!, $pageToken: String!) {
-    listPatientFiles(patientId: $patientId, parentFolderId: $parentFolderId, searchQuery: $searchQuery, pageSize: $pageSize, pageToken: $pageToken) {
-      patientFiles { id title createTime fileType }
       nextPageToken
     }
   }`;
@@ -130,20 +129,32 @@ async function fetchDischargedPatients(): Promise<PatientGroup[]> {
   return [...groups.values()];
 }
 
-/** 患者が「退院サマリ」を含むファイルを既に持っているか */
-async function hasDischargeSummaryFile(patientUuid: string): Promise<boolean> {
-  let pageToken = '';
-  do {
-    const data = await query<{ listPatientFiles?: { patientFiles?: Array<{ title?: string }>; nextPageToken?: string } }>(
-      FILES_Q,
-      { patientId: patientUuid, parentFolderId: null, searchQuery: null, pageSize: PAGE_SIZE, pageToken },
-      '/graphql-v2',
-    );
-    for (const f of data.listPatientFiles?.patientFiles || []) {
-      if ((f.title || '').includes(SUMMARY_KEYWORD)) return true;
-    }
-    pageToken = data.listPatientFiles?.nextPageToken || '';
-  } while (pageToken);
+/**
+ * Firestore discharge_summaries に「同 patientUuid + admissionDate」のレコードが既にあるか。
+ * 同一入院に対する重複生成だけを止めたいので admissionDate も突き合わせる
+ * （過去の別入院のサマリが残っていても、今回の入院は生成対象）。
+ *
+ * 単一フィールド (patientUuid) の同値クエリだけで済ませて、admissionDate はクライアント側で照合する。
+ * 患者ごとの過去サマリ件数は高々数件なので複合インデックスは不要。
+ */
+async function hasFirestoreSummary(patientUuid: string, admissionDateStr: string): Promise<boolean> {
+  if (!admissionDateStr) return false; // 入院日が取れない場合は冪等性を諦め、後段の処理に任せる
+  const results = await webappsFirestoreRunQuery({
+    from: [{ collectionId: 'discharge_summaries' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'patientUuid' },
+        op: 'EQUAL',
+        value: { stringValue: patientUuid },
+      },
+    },
+    limit: 20,
+  });
+  for (const row of results) {
+    const fields = row.document?.fields;
+    if (!fields) continue;
+    if (fields.admissionDate?.stringValue === admissionDateStr) return true;
+  }
   return false;
 }
 
@@ -155,8 +166,8 @@ export interface DetectResult {
 }
 
 /**
- * 直近 windowDays 日以内に退院し、まだ「退院サマリ」ファイルが無い患者を抽出する。
- * サーバー負荷軽減のため listPatientFiles は逐次 + sleep。
+ * 直近 windowDays 日以内に退院し、まだサマリ未生成の患者を抽出する。
+ * サーバー負荷軽減のため Firestore クエリは逐次 + sleep。
  */
 export async function detectTargets(windowDays: number): Promise<DetectResult> {
   const all = await fetchDischargedPatients();
@@ -171,7 +182,7 @@ export async function detectTargets(windowDays: number): Promise<DetectResult> {
   let alreadyHasSummary = 0;
   for (const g of inWindow) {
     await sleep(READ_DELAY_MS);
-    if (await hasDischargeSummaryFile(g.patientUuid)) {
+    if (await hasFirestoreSummary(g.patientUuid, formatHenryDate(g.admissionDate))) {
       alreadyHasSummary++;
       continue;
     }
