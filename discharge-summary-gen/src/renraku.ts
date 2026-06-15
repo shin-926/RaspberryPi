@@ -221,7 +221,7 @@ export async function generateRenrakuForms(
         llm?.comorbidities?.selections,
         diseaseByUuid,
         new Set([
-          classified.mainAtDischarge?.uuid,
+          llm?.main_disease?.uuid,
           llm?.trigger_disease?.uuid,
           llm?.resource_disease?.uuid,
         ].filter((u): u is string => !!u)),
@@ -230,7 +230,7 @@ export async function generateRenrakuForms(
         llm?.post_admission_diseases?.selections,
         diseaseByUuid,
         new Set([
-          classified.mainAtDischarge?.uuid,
+          llm?.main_disease?.uuid,
           llm?.trigger_disease?.uuid,
           llm?.resource_disease?.uuid,
           ...(llm?.comorbidities?.selections?.map((s) => s.uuid) ?? []),
@@ -272,7 +272,10 @@ export async function generateRenrakuForms(
         evidence: llmEvidence(llm?.resource_disease?.evidence, 'LLM/医療資源病名'),
         needsMdReview: llm?.resource_disease?.confidence !== 'high',
       },
-      mainDisease: classified.mainAtDischarge || classified.beforeOrAtAdmission[0],
+      mainDisease:
+        pickDisease(llm?.main_disease?.uuid) ||
+        classified.mainAtDischarge ||
+        classified.beforeOrAtAdmission[0],
     },
 
     nurseFormAdmission: {
