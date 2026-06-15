@@ -140,7 +140,8 @@ export async function generateRenrakuForms(
   // ===== 4. LLMに渡す項目 =====
   // 1回のLLM呼び出しで全LLM項目をまとめて取得する。
   // 病名は uuid 形式で候補リストから選ばせる（誤生成防止）
-  const validDiseaseUuids = new Set(diseases.map((d) => d.uuid));
+  // バリデーション用の有効uuidセットは確定病名のみ（疑い病名がLLM出力に含まれていれば警告対象）
+  const validDiseaseUuids = new Set(diseases.filter((d) => !d.isSuspected).map((d) => d.uuid));
   const prompt = buildRenrakuPrompt({
     patient,
     hospitalization: hosp,
@@ -171,7 +172,10 @@ export async function generateRenrakuForms(
   }
 
   // 病名候補から LLM が選択した uuid に対応する DiagnosisItem を引く
-  const diseaseByUuid = new Map<string, DiagnosisItem>(diseases.map((d) => [d.uuid, d]));
+  // 疑い病名は除外（LLM が誤って選んでもフォールバック値が使われる）
+  const diseaseByUuid = new Map<string, DiagnosisItem>(
+    diseases.filter((d) => !d.isSuspected).map((d) => [d.uuid, d]),
+  );
   const pickDisease = (uuid: string | undefined): DiagnosisItem | null => {
     if (!uuid) return null;
     return diseaseByUuid.get(uuid) || null;
