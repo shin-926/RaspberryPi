@@ -8,7 +8,9 @@
     "spike": "tsx src/spike.ts",
     "gen": "tsx src/index.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "iconv-lite": "^0.7.2"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",

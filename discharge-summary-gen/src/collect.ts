@@ -209,6 +209,40 @@ export async function getTargetHospitalization(patientUuid: string): Promise<Hen
   );
 }
 
+/**
+ * 指定された入院日に一致する入院情報を取得（FF1検証用）
+ * 完全一致しない場合は近い入院日（±3日以内）の候補を返す
+ */
+export async function getHospitalizationByAdmissionDate(
+  patientUuid: string,
+  admissionDateIso: string,
+): Promise<HenryHospitalization | null> {
+  const data = await query<{ listPatientHospitalizations?: { hospitalizations?: HenryHospitalization[] } }>(
+    Q_LIST_HOSPITALIZATIONS,
+    { input: { patientUuid, pageSize: 20, pageToken: '' } },
+  );
+  const hospitalizations = data.listPatientHospitalizations?.hospitalizations || [];
+
+  const targetMs = new Date(admissionDateIso).getTime();
+  if (isNaN(targetMs)) return null;
+
+  // 完全一致を最優先
+  const exact = hospitalizations.find((h) => {
+    if (!h.startDate) return false;
+    const sd = `${h.startDate.year}-${String(h.startDate.month).padStart(2, '0')}-${String(h.startDate.day).padStart(2, '0')}`;
+    return sd === admissionDateIso;
+  });
+  if (exact) return exact;
+
+  // ±3日以内の候補
+  for (const h of hospitalizations) {
+    if (!h.startDate) continue;
+    const ms = new Date(h.startDate.year, h.startDate.month - 1, h.startDate.day).getTime();
+    if (Math.abs(ms - targetMs) <= 3 * 24 * 60 * 60 * 1000) return h;
+  }
+  return null;
+}
+
 /** 入院主病名を取得 */
 export async function fetchMainDisease(patientUuid: string): Promise<string> {
   const data = await query<{ listPatientReceiptDiseases?: { patientReceiptDiseases?: HenryDisease[] } }>(
