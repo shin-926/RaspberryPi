@@ -1,0 +1,11 @@
+services:
+  henry-telemetry:
+    build: .
+    container_name: henry-telemetry
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    volumes:
+      - ./data:/data
+    environment:
+      - DB_PATH=/data/henry-telemetry.db

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Henry Telemetry</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --border: #e1e5eb;
+      --text: #1a202c;
+      --muted: #718096;
+      --primary: #3b82f6;
+      --error: #ef4444;
+      --warn: #f59e0b;
+      --info: #6b7280;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN',
+                   'Hiragino Sans', 'Yu Gothic UI', Meiryo, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    .live-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .live-dot.paused { background: #cbd5e1; animation: none; }
+    .pause-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pause-btn:hover { background: var(--bg); }
+
+    main { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+    }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    .stat-sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+    .filters {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .filter-group label { color: var(--muted); }
+    .filter-group input,
+    .filter-group select {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 13px;
+      font-family: inherit;
+      background: white;
+    }
+    .filter-group input[type=search] { min-width: 200px; }
+    .clear-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .clear-btn:hover { background: var(--bg); }
+
+    .table-wrap {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      background: #fafbfc;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      position: sticky;
+      top: 0;
+    }
+    tr.event-row { cursor: pointer; }
+    tr.event-row:hover { background: #fafbfc; }
+    tr.event-row.expanded { background: #f0f7ff; }
+    tr.detail-row td {
+      background: #f8fafc;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    td.time { white-space: nowrap; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    td.script { white-space: nowrap; font-weight: 500; }
+    td.type { white-space: nowrap; }
+    td.message {
+      max-width: 600px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      font-size: 12px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .badge.console-error { background: #fee2e2; color: #b91c1c; }
+    .badge.uncaught { background: #fecaca; color: #991b1b; }
+    .badge.unhandled-rejection { background: #fed7aa; color: #c2410c; }
+    .badge.user-report { background: #dbeafe; color: #1e40af; }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 6px 16px;
+      font-size: 12px;
+      margin: 0;
+    }
+    .detail-grid dt { color: var(--muted); }
+    .detail-grid dd {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      word-break: break-all;
+    }
+    .stack-block {
+      margin-top: 10px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 10px 14px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      overflow-x: auto;
+    }
+    .full-message {
+      margin-top: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      font-size: 12px;
+      background: white;
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: #fafbfc;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pagination button {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Henry Telemetry</h1>
+    <span class="live-indicator">
+      <span class="live-dot" id="liveDot"></span>
+      <span id="liveText">Live (5秒更新)</span>
+    </span>
+    <button class="pause-btn" id="pauseBtn">一時停止</button>
+    <span style="margin-left:auto; color: var(--muted); font-size: 12px;">
+      最終更新: <span id="lastUpdate">-</span>
+    </span>
+  </header>
+
+  <main>
+    <section class="stats">
+      <div class="stat-card">
+        <div class="stat-label">直近24時間</div>
+        <div class="stat-value" id="stat24h">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">通算</div>
+        <div class="stat-value" id="statAll">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">スクリプト別 (24h Top 3)</div>
+        <div class="stat-sub" id="statByScript">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">タイプ別 (24h)</div>
+        <div class="stat-sub" id="statByType">-</div>
+      </div>
+    </section>
+
+    <section class="filters">
+      <div class="filter-group">
+        <label>type</label>
+        <select id="filterType">
+          <option value="">すべて</option>
+          <option value="console-error">console-error</option>
+          <option value="uncaught">uncaught</option>
+          <option value="unhandled-rejection">unhandled-rejection</option>
+          <option value="user-report">user-report</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>scriptName</label>
+        <input type="search" id="filterScript" placeholder="例: DriveDocsHandler">
+      </div>
+      <div class="filter-group">
+        <label>userUuid</label>
+        <input type="search" id="filterUser" placeholder="UUID">
+      </div>
+      <div class="filter-group">
+        <label>message</label>
+        <input type="search" id="filterQ" placeholder="部分一致検索">
+      </div>
+      <button class="clear-btn" id="clearBtn">クリア</button>
+    </section>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:140px">受信時刻</th>
+            <th style="width:160px">スクリプト</th>
+            <th style="width:140px">タイプ</th>
+            <th>メッセージ</th>
+          </tr>
+        </thead>
+        <tbody id="eventsBody">
+          <tr><td colspan="4" class="empty-state">読み込み中...</td></tr>
+        </tbody>
+      </table>
+      <div class="pagination">
+        <span id="pageInfo">-</span>
+        <span>
+          <button id="prevBtn">← 前へ</button>
+          <button id="nextBtn">次へ →</button>
+        </span>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const POLL_INTERVAL_MS = 5000;
+    const PAGE_SIZE = 100;
+
+    let offset = 0;
+    let total = 0;
+    let paused = false;
+    const expandedIds = new Set();
+    let lastEvents = [];
+
+    const $ = (id) => document.getElementById(id);
+
+    function buildQuery() {
+      const params = new URLSearchParams();
+      params.set('limit', String(PAGE_SIZE));
+      params.set('offset', String(offset));
+      const type = $('filterType').value;
+      const script = $('filterScript').value.trim();
+      const user = $('filterUser').value.trim();
+      const q = $('filterQ').value.trim();
+      if (type) params.set('type', type);
+      if (script) params.set('scriptName', script);
+      if (user) params.set('userUuid', user);
+      if (q) params.set('q', q);
+      return params.toString();
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getMonth() + 1}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function makeCell(tag, className, text) {
+      const el = document.createElement(tag);
+      if (className) el.className = className;
+      if (text != null) el.textContent = text;
+      return el;
+    }
+
+    function makeDl(pairs) {
+      const dl = document.createElement('dl');
+      dl.className = 'detail-grid';
+      for (const [label, value] of pairs) {
+        const dt = document.createElement('dt');
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        dd.textContent = value || '-';
+        dl.append(dt, dd);
+      }
+      return dl;
+    }
+
+    function renderDetailRow(e) {
+      const row = document.createElement('tr');
+      row.className = 'detail-row';
+      const td = document.createElement('td');
+      td.colSpan = 4;
+
+      const dl = makeDl([
+        ['id', String(e.id)],
+        ['received_at', e.received_at],
+        ['timestamp (client)', e.timestamp],
+        ['extension version', e.extension_version],
+        ['url', e.url],
+        ['userUuid', e.user_uuid],
+        ['patientUuid', e.patient_uuid],
+        ['userAgent', e.user_agent],
+      ]);
+
+      const msg = document.createElement('div');
+      msg.className = 'full-message';
+      msg.textContent = e.message || '';
+
+      td.append(dl, msg);
+
+      if (e.stack) {
+        const stack = document.createElement('div');
+        stack.className = 'stack-block';
+        stack.textContent = e.stack;
+        td.append(stack);
+      }
+      row.append(td);
+      return row;
+    }
+
+    function renderEvents(events) {
+      lastEvents = events;
+      const tbody = $('eventsBody');
+      tbody.replaceChildren();
+
+      if (events.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'empty-state';
+        td.textContent = '該当するイベントがありません';
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+
+      for (const e of events) {
+        const isExpanded = expandedIds.has(e.id);
+        const row = document.createElement('tr');
+        row.className = 'event-row' + (isExpanded ? ' expanded' : '');
+        row.dataset.id = String(e.id);
+
+        row.append(makeCell('td', 'time', formatTime(e.received_at)));
+        row.append(makeCell('td', 'script', e.script_name));
+
+        const typeCell = document.createElement('td');
+        typeCell.className = 'type';
+        const badge = document.createElement('span');
+        badge.className = 'badge ' + (e.type || '');
+        badge.textContent = e.type || '';
+        typeCell.append(badge);
+        row.append(typeCell);
+
+        const msgPreview = (e.message || '').substring(0, 200);
+        row.append(makeCell('td', 'message', msgPreview));
+
+        row.addEventListener('click', () => {
+          const id = Number(row.dataset.id);
+          if (expandedIds.has(id)) expandedIds.delete(id);
+          else expandedIds.add(id);
+          renderEvents(lastEvents); // 再描画
+        });
+
+        tbody.append(row);
+
+        if (isExpanded) {
+          tbody.append(renderDetailRow(e));
+        }
+      }
+    }
+
+    async function fetchAndRender() {
+      try {
+        const res = await fetch(`/api/henry-telemetry/events?${buildQuery()}`);
+        const data = await res.json();
+        total = data.total || 0;
+        renderEvents(data.events || []);
+        const start = total === 0 ? 0 : offset + 1;
+        const end = Math.min(offset + (data.events?.length || 0), total);
+        $('pageInfo').textContent = `${start}-${end} / ${total}件`;
+        $('prevBtn').disabled = offset === 0;
+        $('nextBtn').disabled = end >= total;
+        $('lastUpdate').textContent = formatTime(new Date().toISOString());
+      } catch (e) {
+        console.error('fetch events error:', e);
+      }
+    }
+
+    async function fetchStats() {
+      try {
+        const res = await fetch('/api/henry-telemetry/stats');
+        const data = await res.json();
+        $('stat24h').textContent = (data.total24h || 0).toLocaleString();
+        $('statAll').textContent = (data.totalAll || 0).toLocaleString();
+        $('statByScript').textContent = (data.byScript || [])
+          .slice(0, 3)
+          .map(r => `${r.script_name} (${r.count})`)
+          .join(', ') || '-';
+        $('statByType').textContent = (data.byType || [])
+          .map(r => `${r.type}: ${r.count}`)
+          .join(' / ') || '-';
+      } catch (e) {
+        console.error('fetch stats error:', e);
+      }
+    }
+
+    function refreshAll() {
+      if (paused) return;
+      fetchAndRender();
+      fetchStats();
+    }
+
+    refreshAll();
+    setInterval(refreshAll, POLL_INTERVAL_MS);
+
+    let filterDebounce;
+    ['filterType', 'filterScript', 'filterUser', 'filterQ'].forEach(id => {
+      $(id).addEventListener('input', () => {
+        clearTimeout(filterDebounce);
+        filterDebounce = setTimeout(() => {
+          offset = 0;
+          expandedIds.clear();
+          fetchAndRender();
+        }, 250);
+      });
+    });
+
+    $('clearBtn').addEventListener('click', () => {
+      $('filterType').value = '';
+      $('filterScript').value = '';
+      $('filterUser').value = '';
+      $('filterQ').value = '';
+      offset = 0;
+      expandedIds.clear();
+      fetchAndRender();
+    });
+
+    $('prevBtn').addEventListener('click', () => {
+      offset = Math.max(0, offset - PAGE_SIZE);
+      expandedIds.clear();
+      fetchAndRender();
+    });
+    $('nextBtn').addEventListener('click', () => {
+      offset = offset + PAGE_SIZE;
+      expandedIds.clear();
+      fetchAndRender();
+    });
+
+    $('pauseBtn').addEventListener('click', () => {
+      paused = !paused;
+      $('liveDot').classList.toggle('paused', paused);
+      $('liveText').textContent = paused ? '一時停止中' : 'Live (5秒更新)';
+      $('pauseBtn').textContent = paused ? '再開' : '一時停止';
+      if (!paused) refreshAll();
+    });
+  </script>
+</body>
+</html>
