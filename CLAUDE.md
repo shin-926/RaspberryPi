@@ -60,9 +60,6 @@
 |---------|-------|------------|
 | Uptime Kuma | 3001 | `~/docker/uptime-kuma/docker-compose.yml` |
 | Pi-hole | 8080 (Web), 53 (DNS) | `~/docker/pihole/docker-compose.yml` |
-| Nextcloud | 8888 | `~/docker/nextcloud/docker-compose.yml` |
-| Home Assistant | 8123 | `~/docker/homeassistant/docker-compose.yml` |
-| Whisper (STT) | 10300 | `~/docker/whisper/docker-compose.yml` |
 | ai-proxy | 3002 | `~/ai-proxy/docker-compose.yml` (Mac側 `~/Documents/RaspberryPi/ai-proxy/`) |
 | henry-user-settings | 3003 | `~/henry-user-settings/docker-compose.yml` (Mac側 `~/Documents/RaspberryPi/henry-user-settings/`) |
 
@@ -73,25 +70,30 @@
 | `/var/www/html/` | 公開Webページ |
 | `/etc/nginx/` | Nginx設定 |
 | `~/docker/` | Docker Compose設定 |
-| `~/ward-board-sync/` | 病棟ボード同期スクリプト（cron） |
+| `~/discharge-summary-gen/` | 退院サマリー自動生成スクリプト（cron） |
 | `~/ai-proxy/` | Claude/Gemini API プロキシ (Docker) |
 | `~/henry-user-settings/` | Henry拡張のユーザー設定同期サーバー (Docker) |
+| `~/kango-shift/` | 看護シフト管理アプリ (Docker) |
+| `~/backup/` | バックアップログ (`backup.log`) |
+| `/usr/local/bin/rpi-backup.sh` | 重要データのGoogle Driveバックアップスクリプト |
 | `~/.config/gcloud/` | ADC認証情報（Firebase Admin SDK用） |
+| `~/.config/rclone/rclone.conf` | rclone設定（gdrive remote）|
 
 ## Cronジョブ
 
-| ジョブ | スケジュール | 内容 | ログ |
-|------|------------|-----|-----|
-| ward-board-sync | 毎日 7:00 / 18:00 JST | Henry入院患者リストをFirestore (`maokahp-webapps`) の `wardPatients` コレクションに同期 | `~/ward-board-sync/sync.log` |
+| ジョブ | スケジュール | 実行ユーザー | 内容 | ログ |
+|------|------------|------------|-----|-----|
+| discharge-summary-gen | 毎日 7:30 JST | shinichiro | 退院サマリー自動生成 | `~/discharge-summary-gen/cron.log` |
+| rpi-backup | 毎日 3:00 JST | root | 重要データを Google Drive へバックアップ（30日保持）| `~/backup/backup.log` |
 
-`crontab -l` で確認・編集。
+確認・編集: `crontab -l`（user） / `sudo crontab -l`（root）
 
-### ward-board-sync 詳細
-- **Macソース**: `~/Documents/RaspberryPi/ward-board-sync/`
-- **認証**: ADC（Firestore） + Firebase refresh token（Henry GraphQL）
-- **シークレット**: `.env` と `.secrets/token-cache.json`（gitignore済）
-- **手動実行**: `ssh raspberrypi 'cd ~/ward-board-sync && npm run sync'`
-- **再デプロイ**: `rsync -av --exclude='node_modules' ~/Documents/RaspberryPi/ward-board-sync/ raspberrypi:~/ward-board-sync/`
+### バックアップ詳細
+- **対象**: `henry-user-settings.db`, `kango.db`, 各 `.env` / `.secrets/`, `~/.config/gcloud/`, `~/.ssh/`, `/etc/nginx/`, `cloudflared.service`
+- **保存先**: Google Drive `RaspberryPi-Backup/` フォルダ
+- **保持期間**: 30日（自動削除）
+- **手動実行**: `ssh raspberrypi 'sudo /usr/local/bin/rpi-backup.sh'`
+- **復元**: `rclone copy gdrive:RaspberryPi-Backup/rpi-backup-YYYYMMDD-HHMMSS.tar.gz .` → 展開して配置
 
 ## ネットワーク設定
 
@@ -120,9 +122,5 @@
 
 - [x] Docker導入
 - [x] Tailscale導入
-- [x] Nextcloud導入
-- [x] Home Assistant導入（Philips Hue連携、Android TV Remote、Gemini音声アシスタント）
 - [ ] sk924.com をカッコよくする
 - [ ] サブドメインで複数サービス公開
-- [ ] Nextcloud（自分専用クラウドストレージ）
-- [ ] Home Assistant（スマートホーム）
