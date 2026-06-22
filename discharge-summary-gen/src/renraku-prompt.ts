@@ -13,13 +13,12 @@ import { formatHenryDate } from './collect.ts';
 import type { HenryPatient, HenryHospitalization } from './types.ts';
 import type { DiagnosisItem } from './renraku-types.ts';
 import type { SharedInfo } from './renraku-collect.ts';
-
-const GEMINI_PROXY_URL = process.env.AI_PROXY_GEMINI_URL || 'https://sk924.com/api/gemini';
-const CLAUDE_PROXY_URL = process.env.AI_PROXY_CLAUDE_URL || 'https://sk924.com/api/claude';
+import { callAiProxy, AI_MODELS, type AiProvider } from './ai-client.ts';
 
 /** プロバイダ切替: 'gemini' (デフォルト) または 'claude' */
-const LLM_PROVIDER = (process.env.RENRAKU_LLM_PROVIDER || 'gemini').toLowerCase();
-const LLM_MODEL = process.env.RENRAKU_LLM_MODEL || (LLM_PROVIDER === 'claude' ? 'claude-opus-4-7' : 'gemini-2.5-pro');
+const LLM_PROVIDER: AiProvider =
+  (process.env.RENRAKU_LLM_PROVIDER || 'gemini').toLowerCase() === 'claude' ? 'claude' : 'gemini';
+const LLM_MODEL = process.env.RENRAKU_LLM_MODEL || (LLM_PROVIDER === 'claude' ? AI_MODELS.claudeOpus : AI_MODELS.geminiPro);
 
 // ============================================================
 // SYSTEM PROMPT — DPC連絡表専用
@@ -479,45 +478,20 @@ export function parseRenrakuResponse(content: string): RenrakuLlmDecisions {
 // ============================================================
 // ai-proxy 経由でGemini呼び出し
 // ============================================================
-interface GeminiProxyResponse {
-  success?: boolean;
-  content?: string;
-  usage?: { input_tokens?: number; output_tokens?: number };
-}
-
 export async function callRenrakuLlm(prompt: string): Promise<RenrakuLlmDecisions> {
-  const url = LLM_PROVIDER === 'claude' ? CLAUDE_PROXY_URL : GEMINI_PROXY_URL;
-  const body: Record<string, unknown> = {
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
-    max_tokens: 8192,
+  const { content, usage } = await callAiProxy({
+    provider: LLM_PROVIDER,
     model: LLM_MODEL,
-  };
-  if (LLM_PROVIDER === 'gemini') {
-    body.response_format = 'json';
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    maxTokens: 8192,
+    system: SYSTEM_PROMPT,
+    prompt,
   });
 
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`renraku LLM プロキシエラー (${LLM_PROVIDER}): ${response.status} ${errBody.slice(0, 300)}`);
-  }
-
-  const data = (await response.json()) as GeminiProxyResponse;
-  if (!data.success || !data.content) {
-    throw new Error(`renraku LLM応答が空です (${LLM_PROVIDER})`);
-  }
-
   console.log(
-    `[renraku-prompt] LLM完了 [${LLM_PROVIDER}/${LLM_MODEL}] (input: ${data.usage?.input_tokens ?? '?'}, output: ${data.usage?.output_tokens ?? '?'})`,
+    `[renraku-prompt] LLM完了 [${LLM_PROVIDER}/${LLM_MODEL}] (input: ${usage.inputTokens}, output: ${usage.outputTokens})`,
   );
 
-  return parseRenrakuResponse(data.content);
+  return parseRenrakuResponse(content);
 }
 
 // ============================================================
